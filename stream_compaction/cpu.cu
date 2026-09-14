@@ -12,6 +12,13 @@ PerformanceTimer &timer() {
     return timer;
 }
 
+void run_scan(int n, int* odata, const int *idata) {
+    odata[0] = 0;
+    for (int i = 1; i < n; ++i) {
+        odata[i] = odata[i - 1] + idata[i - 1];
+    }
+}
+
 /**
  * CPU scan (prefix sum).
  * For performance analysis, this is supposed to be a simple for loop.
@@ -20,9 +27,7 @@ PerformanceTimer &timer() {
  */
 void scan(int n, int *odata, const int *idata) {
     timer().startCpuTimer();
-    for (int i = 1; i < n; ++i) {
-        odata[i] = odata[i - 1] + idata[i - 1];
-    }
+    run_scan(n, odata, idata);
     timer().endCpuTimer();
 }
 
@@ -58,7 +63,7 @@ int compactWithScan(int n, int *odata, const int *idata) {
         tmp[i] = idata[i] == 0 ? 0 : 1;
     }
 
-    scan(n, scan_res.data(), tmp.data());
+    run_scan(n, scan_res.data(), tmp.data());
 
     for (int i = 0; i < n; ++i) {
         if (tmp[i] == 1) {
@@ -66,7 +71,8 @@ int compactWithScan(int n, int *odata, const int *idata) {
         }
     }
     timer().endCpuTimer();
-    return scan_res[n - 1];
+    // scan_res is exclusive
+    return scan_res[n - 1] - tmp[n - 1];
 }
 } // namespace CPU
 } // namespace StreamCompaction
