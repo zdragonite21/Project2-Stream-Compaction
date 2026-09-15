@@ -14,11 +14,16 @@ PerformanceTimer &timer() {
     return timer;
 }
 
-__global__ void kern_scan(int n, int *data, int depth) {
+__global__ void kern_scan(int n, int *data) {
+    extern __shared__ int temp[];
+
     int thid = blockIdx.x * blockDim.x + threadIdx.x;
-    if (thid >= n) {
-        return;
-    }
+    // if (thid >= n) {
+    //     return;
+    // }
+
+    temp[thid << 1] = data[thid << 1];
+    temp[(thid << 1) + 1] = data[(thid << 1) + 1];
 
     // upsweep
     int offset = 1;
@@ -28,7 +33,7 @@ __global__ void kern_scan(int n, int *data, int depth) {
             int base = 2 * offset * thid;
             int ai = base + offset - 1;
             int bi = base + 2 * offset - 1;
-            data[bi] += data[ai];
+            temp[bi] += temp[ai];
         }
         offset <<= 1;
     }
@@ -36,40 +41,52 @@ __global__ void kern_scan(int n, int *data, int depth) {
     // downsweep
     if (thid == 0) {
         // have the first thread clear the last element
-        data[n - 1] = 0;
+        temp[n - 1] = 0;
     }
 
     for (int d = 1; d < n; d <<= 1) {
         offset >>= 1;
         __syncthreads();
-        int base = 2 * offset * thid;
-        int ai = base + offset - 1;
-        int bi = base + 2 * offset - 1;
+        if (thid < d) {
+            int base = 2 * offset * thid;
+            int ai = base + offset - 1;
+            int bi = base + 2 * offset - 1;
 
-        float t = data[ai];
-        data[ai] = data[bi];
-        data[bi] += t;
+            int t = temp[ai];
+            temp[ai] = temp[bi];
+            temp[bi] += t;
+        }
     }
+
+    __syncthreads();
+    data[thid << 1] = temp[thid << 1];
+    data[(thid << 1) + 1] = temp[(thid << 1) + 1];
 }
 
 /**
  * Performs prefix-sum (aka scan) on idata, storing the result into odata.
  */
 void scan(int n, int *odata, const int *idata) {
+    int size = (block_size << 1);
+    int offset = size - n;
+
     int *dev_data;
-    cudaMalloc((void **)&dev_data, n * sizeof(int));
+    cudaMalloc((void **)&dev_data, size * sizeof(int));
     checkCUDAError("cudaMalloc dev_data failed!");
-    cudaMemcpy(dev_data, idata, n * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemset(dev_data, 0, offset * sizeof(int));
+    cudaMemcpy(dev_data + offset, idata, n * sizeof(int), cudaMemcpyHostToDevice);
     checkCUDAError("cudaMemcpy dev_data failed!");
 
     timer().startGpuTimer();
-    int num_blocks = divup(n, block_size);
+    int num_blocks = divup(n, size);
     int depth = ilog2ceil(n);
-    kern_scan<<<num_blocks, block_size>>>(n, dev_data, depth);
+    // each block handles a range of 2 * block_size elements
+    kern_scan<<<num_blocks, block_size, size * sizeof(int)>>>(
+        size, dev_data);
 
     timer().endGpuTimer();
 
-    cudaMemcpy(odata, dev_data, n * sizeof(int), cudaMemcpyDeviceToHost);
+    cudaMemcpy(odata, dev_data + offset, n * sizeof(int), cudaMemcpyDeviceToHost);
 
     cudaFree(dev_data);
 }
