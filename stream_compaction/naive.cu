@@ -4,7 +4,7 @@
 #include <cuda_runtime.h>
 #include <vector>
 
-#define block_size 1024
+#define threads_per_block 1024
 
 namespace StreamCompaction {
 namespace Naive {
@@ -57,12 +57,12 @@ void scan(int n, int *odata, const int *idata) {
     checkCUDAError("cudaMemcpy dev_idata failed!");
 
     timer().startGpuTimer();
-    int num_blocks = divup(n, block_size);
+    int num_blocks = divup(n, threads_per_block);
     for (int offset = 1; offset < n; offset *= 2) {
-        kern_scan<<<num_blocks, block_size>>>(n, dev_odata, dev_idata, offset);
+        kern_scan<<<num_blocks, threads_per_block>>>(n, dev_odata, dev_idata, offset);
         std::swap(dev_odata, dev_idata);
     }
-    kern_shift<<<num_blocks, block_size>>>(n, dev_odata, dev_idata);
+    kern_shift<<<num_blocks, threads_per_block>>>(n, dev_odata, dev_idata);
     timer().endGpuTimer();
 
     cudaMemcpy(odata, dev_odata, n * sizeof(int), cudaMemcpyDeviceToHost);
