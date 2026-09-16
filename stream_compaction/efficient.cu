@@ -4,7 +4,7 @@
 #include <cuda_runtime.h>
 #include <iostream>
 
-#define threads_per_block 64
+#define threads_per_block 16
 
 namespace StreamCompaction {
 namespace Efficient {
@@ -27,7 +27,8 @@ __global__ void kern_inc(int chunk_size, int num_chunks, int *data, int *sums) {
     }
 }
 
-__global__ void kern_scan(int chunk_size, int *data, int *sums, bool store_sum) {
+__global__ void kern_scan(int chunk_size, int *data, int *sums,
+                          bool store_sum) {
     extern __shared__ int temp[];
 
     int local_thid = threadIdx.x;
@@ -80,56 +81,78 @@ __global__ void kern_scan(int chunk_size, int *data, int *sums, bool store_sum) 
     }
 }
 
-/**
- * Performs prefix-sum (aka scan) on idata, storing the result into odata.
- */
-void scan(int n, int *odata, const int *idata) {
+struct params {
+    int chunk_size;
+    int num_chunks;
+    int pad;
+    int padded_size;
+};
+
+params compute_params(int n) {
     // one thread handles two elements
-    int chunk_size = (threads_per_block << 1);
+    const int chunk_size = threads_per_block << 1;
 
     int num_chunks = divup(n, chunk_size);
     int pad = (chunk_size - (n % chunk_size)) % chunk_size;
     int padded_size = num_chunks * chunk_size;
 
+    return params{
+        chunk_size,
+        num_chunks,
+        pad,
+        padded_size,
+    };
+}
+
+void recursive_scan(params p, int *dev_data) {
+    params sp = compute_params(p.num_chunks);
+
+    if (p.num_chunks > 1) {
+        int num_inc_blocks = divup(p.num_chunks, threads_per_block);
+
+        int *dev_sums;
+        cudaMalloc((void **)&dev_sums, sp.padded_size * sizeof(int));
+        checkCUDAError("cudaMalloc dev_block_sums failed!");
+        cudaMemset(dev_sums, 0, sp.pad * sizeof(int));
+        checkCUDAError("cudaMemset dev_block_sums failed!");
+
+        kern_scan<<<p.num_chunks, threads_per_block,
+                    p.chunk_size * sizeof(int)>>>(p.chunk_size, dev_data,
+                                                  dev_sums + sp.pad, true);
+        recursive_scan(sp, dev_sums);
+
+        kern_inc<<<num_inc_blocks, threads_per_block>>>(
+            p.chunk_size, p.num_chunks, dev_data, dev_sums + sp.pad);
+
+        cudaFree(dev_sums);
+    } else {
+        kern_scan<<<p.num_chunks, threads_per_block,
+                    p.chunk_size * sizeof(int)>>>(p.chunk_size, dev_data,
+                                                  nullptr, false);
+    }
+}
+
+/**
+ * Performs prefix-sum (aka scan) on idata, storing the result into odata.
+ */
+void scan(int n, int *odata, const int *idata) {
+    params p = compute_params(n);
+
     // pad the front with zeros
     int *dev_data;
-    cudaMalloc((void **)&dev_data, padded_size * sizeof(int));
+    cudaMalloc((void **)&dev_data, p.padded_size * sizeof(int));
     checkCUDAError("cudaMalloc dev_data failed!");
-    cudaMemset(dev_data, 0, pad * sizeof(int));
+    cudaMemset(dev_data, 0, p.pad * sizeof(int));
     checkCUDAError("cudaMemset dev_data failed!");
-    cudaMemcpy(dev_data + pad, idata, n * sizeof(int),
+    cudaMemcpy(dev_data + p.pad, idata, n * sizeof(int),
                cudaMemcpyHostToDevice);
     checkCUDAError("cudaMemcpy dev_data failed!");
 
-    int num_sum_chunks = divup(num_chunks, chunk_size);
-    int sum_pad = (chunk_size - (num_chunks % chunk_size)) % chunk_size;
-    int sum_padded_size = num_sum_chunks * chunk_size;
-    int num_inc_blocks = divup(num_chunks, threads_per_block);
+    recursive_scan(p, dev_data);
 
-    // pad the sum array as well
-    int *dev_sums;
-    cudaMalloc((void **)&dev_sums, sum_padded_size * sizeof(int));
-    checkCUDAError("cudaMalloc dev_block_sums failed!");
-    cudaMemset(dev_sums, 0, sum_pad * sizeof(int));
-    checkCUDAError("cudaMemset dev_block_sums failed!");
-
-    timer().startGpuTimer();
-
-    kern_scan<<<num_chunks, threads_per_block, chunk_size * sizeof(int)>>>(
-        chunk_size, dev_data, dev_sums + sum_pad, true);
-
-    kern_scan<<<num_sum_chunks, threads_per_block, chunk_size * sizeof(int)>>>(
-        chunk_size, dev_sums, nullptr, false);
-
-    kern_inc<<<num_inc_blocks, threads_per_block>>>(chunk_size, num_chunks, dev_data,
-                                             dev_sums + sum_pad);
-
-    timer().endGpuTimer();
-
-    cudaMemcpy(odata, dev_data + pad, n * sizeof(int),
+    cudaMemcpy(odata, dev_data + p.pad, n * sizeof(int),
                cudaMemcpyDeviceToHost);
     cudaFree(dev_data);
-    cudaFree(dev_sums);
 }
 
 /**
