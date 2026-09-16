@@ -4,7 +4,7 @@
 #include <cuda_runtime.h>
 #include <iostream>
 
-#define threads_per_block 16
+#define threads_per_block 1024
 
 namespace StreamCompaction {
 namespace Efficient {
@@ -104,31 +104,29 @@ params compute_params(int n) {
     };
 }
 
-void recursive_scan(params p, int *dev_data) {
+void recursive_scan(params p, int *dev_heap) {
     params sp = compute_params(p.num_chunks);
 
     if (p.num_chunks > 1) {
         int num_inc_blocks = divup(p.num_chunks, threads_per_block);
 
-        int *dev_sums;
-        cudaMalloc((void **)&dev_sums, sp.padded_size * sizeof(int));
-        checkCUDAError("cudaMalloc dev_block_sums failed!");
-        cudaMemset(dev_sums, 0, sp.pad * sizeof(int));
-        checkCUDAError("cudaMemset dev_block_sums failed!");
+        int *dev_sums = dev_heap + p.padded_size;
 
         kern_scan<<<p.num_chunks, threads_per_block,
-                    p.chunk_size * sizeof(int)>>>(p.chunk_size, dev_data,
+                    p.chunk_size * sizeof(int)>>>(p.chunk_size, dev_heap,
                                                   dev_sums + sp.pad, true);
+        // checkCUDAError("kern_scan write sum failed");
+
         recursive_scan(sp, dev_sums);
 
         kern_inc<<<num_inc_blocks, threads_per_block>>>(
-            p.chunk_size, p.num_chunks, dev_data, dev_sums + sp.pad);
-
-        cudaFree(dev_sums);
+            p.chunk_size, p.num_chunks, dev_heap, dev_sums + sp.pad);
+        // checkCUDAError("kern_inc failed");
     } else {
         kern_scan<<<p.num_chunks, threads_per_block,
-                    p.chunk_size * sizeof(int)>>>(p.chunk_size, dev_data,
+                    p.chunk_size * sizeof(int)>>>(p.chunk_size, dev_heap,
                                                   nullptr, false);
+        // checkCUDAError("kern_scan failed");
     }
 }
 
@@ -138,23 +136,32 @@ void recursive_scan(params p, int *dev_data) {
 void scan(int n, int *odata, const int *idata) {
     params p = compute_params(n);
 
-    // pad the front with zeros
-    int *dev_data;
-    cudaMalloc((void **)&dev_data, p.padded_size * sizeof(int));
-    checkCUDAError("cudaMalloc dev_data failed!");
-    cudaMemset(dev_data, 0, p.pad * sizeof(int));
-    checkCUDAError("cudaMemset dev_data failed!");
-    cudaMemcpy(dev_data + p.pad, idata, n * sizeof(int),
+    // compute the exact total amount of memory needed
+    int heap_size = p.padded_size;
+    params a = p;
+    while (a.num_chunks > 1) {
+        params b = compute_params(a.num_chunks);
+        heap_size += b.padded_size;
+        a = b;
+    }
+
+    // store all data and block sum arrays in one heap
+    int *dev_heap;
+    cudaMalloc((void **)&dev_heap, heap_size * sizeof(int));
+    checkCUDAError("cudaMalloc heap failed!");
+    cudaMemset(dev_heap, 0, heap_size * sizeof(int));
+    checkCUDAError("cudaMemset heap failed!");
+    cudaMemcpy(dev_heap + p.pad, idata, n * sizeof(int),
                cudaMemcpyHostToDevice);
-    checkCUDAError("cudaMemcpy dev_data failed!");
+    checkCUDAError("cudaMemcpy heap failed!");
 
     timer().startGpuTimer();
-    recursive_scan(p, dev_data);
+    recursive_scan(p, dev_heap);
     timer().endGpuTimer();
 
-    cudaMemcpy(odata, dev_data + p.pad, n * sizeof(int),
+    cudaMemcpy(odata, dev_heap + p.pad, n * sizeof(int),
                cudaMemcpyDeviceToHost);
-    cudaFree(dev_data);
+    cudaFree(dev_heap);
 }
 
 /**
