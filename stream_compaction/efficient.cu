@@ -15,7 +15,7 @@ PerformanceTimer &timer() {
 }
 
 __global__ void kern_inc(int chunk_size, int num_chunks, int *data, int *sums) {
-    // a thread is spawned per block
+    // a thread is spawned per chunk
     int thid = blockIdx.x * blockDim.x + threadIdx.x;
     if (thid >= num_chunks) {
         return;
@@ -148,7 +148,9 @@ void scan(int n, int *odata, const int *idata) {
                cudaMemcpyHostToDevice);
     checkCUDAError("cudaMemcpy dev_data failed!");
 
+    timer().startGpuTimer();
     recursive_scan(p, dev_data);
+    timer().endGpuTimer();
 
     cudaMemcpy(odata, dev_data + p.pad, n * sizeof(int),
                cudaMemcpyDeviceToHost);
