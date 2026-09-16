@@ -4,7 +4,7 @@
 #include <cuda_runtime.h>
 #include <iostream>
 
-#define threads_per_block 32
+#define threads_per_block 64
 
 namespace StreamCompaction {
 namespace Efficient {
@@ -104,6 +104,7 @@ void scan(int n, int *odata, const int *idata) {
     int num_sum_chunks = divup(num_chunks, chunk_size);
     int sum_pad = (chunk_size - (num_chunks % chunk_size)) % chunk_size;
     int sum_padded_size = num_sum_chunks * chunk_size;
+    int num_inc_blocks = divup(num_chunks, threads_per_block);
 
     // pad the sum array as well
     int *dev_sums;
@@ -120,7 +121,7 @@ void scan(int n, int *odata, const int *idata) {
     kern_scan<<<num_sum_chunks, threads_per_block, chunk_size * sizeof(int)>>>(
         chunk_size, dev_sums, nullptr, false);
 
-    kern_inc<<<num_sum_chunks, threads_per_block>>>(chunk_size, num_chunks, dev_data,
+    kern_inc<<<num_inc_blocks, threads_per_block>>>(chunk_size, num_chunks, dev_data,
                                              dev_sums + sum_pad);
 
     timer().endGpuTimer();
