@@ -120,8 +120,8 @@ void scan(int n, int *odata, const int *idata) {
     kern_scan<<<num_sum_chunks, threads_per_block, chunk_size * sizeof(int)>>>(
         chunk_size, dev_sums, nullptr, false);
 
-    kern_inc<<<num_sum_chunks, threads_per_block>>>(chunk_size + sum_pad, num_chunks, dev_data,
-                                             dev_sums);
+    kern_inc<<<num_sum_chunks, threads_per_block>>>(chunk_size, num_chunks, dev_data,
+                                             dev_sums + sum_pad);
 
     timer().endGpuTimer();
 
