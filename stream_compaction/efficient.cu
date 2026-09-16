@@ -5,6 +5,8 @@
 #include <iostream>
 
 #define threads_per_block 1024
+// one thread handles two elements
+#define chunk_size 2 * threads_per_block
 
 namespace StreamCompaction {
 namespace Efficient {
@@ -14,7 +16,7 @@ PerformanceTimer &timer() {
     return timer;
 }
 
-__global__ void kern_inc(int chunk_size, int num_chunks, int *data, int *sums) {
+__global__ void kern_inc(int num_chunks, int *data, int *sums) {
     // a thread is spawned per chunk
     int thid = blockIdx.x * blockDim.x + threadIdx.x;
     if (thid >= num_chunks) {
@@ -22,13 +24,13 @@ __global__ void kern_inc(int chunk_size, int num_chunks, int *data, int *sums) {
     }
     int base = thid * chunk_size;
     int inc = sums[thid];
+#pragma unroll
     for (int i = 0; i < chunk_size; ++i) {
         data[base + i] += inc;
     }
 }
 
-__global__ void kern_scan(int chunk_size, int *data, int *sums,
-                          bool store_sum) {
+__global__ void kern_scan(int *data, int *sums, bool store_sum) {
     extern __shared__ int temp[];
 
     int local_thid = threadIdx.x;
@@ -39,6 +41,7 @@ __global__ void kern_scan(int chunk_size, int *data, int *sums,
 
     // upsweep
     int offset = 1;
+#pragma unroll
     for (int d = chunk_size >> 1; d > 0; d >>= 1) {
         __syncthreads();
         if (local_thid < d) {
@@ -57,7 +60,7 @@ __global__ void kern_scan(int chunk_size, int *data, int *sums,
         total = temp[chunk_size - 1];
         temp[chunk_size - 1] = 0;
     }
-
+#pragma unroll
     for (int d = 1; d < chunk_size; d <<= 1) {
         offset >>= 1;
         __syncthreads();
@@ -82,22 +85,17 @@ __global__ void kern_scan(int chunk_size, int *data, int *sums,
 }
 
 struct params {
-    int chunk_size;
     int num_chunks;
     int pad;
     int padded_size;
 };
 
 params compute_params(int n) {
-    // one thread handles two elements
-    const int chunk_size = threads_per_block << 1;
-
     int num_chunks = divup(n, chunk_size);
     int pad = (chunk_size - (n % chunk_size)) % chunk_size;
     int padded_size = num_chunks * chunk_size;
 
     return params{
-        chunk_size,
         num_chunks,
         pad,
         padded_size,
@@ -113,19 +111,18 @@ void recursive_scan(params p, int *dev_heap) {
         int *dev_sums = dev_heap + p.padded_size;
 
         kern_scan<<<p.num_chunks, threads_per_block,
-                    p.chunk_size * sizeof(int)>>>(p.chunk_size, dev_heap,
-                                                  dev_sums + sp.pad, true);
+                    chunk_size * sizeof(int)>>>(dev_heap, dev_sums + sp.pad,
+                                                true);
         // checkCUDAError("kern_scan write sum failed");
 
         recursive_scan(sp, dev_sums);
 
-        kern_inc<<<num_inc_blocks, threads_per_block>>>(
-            p.chunk_size, p.num_chunks, dev_heap, dev_sums + sp.pad);
+        kern_inc<<<num_inc_blocks, threads_per_block>>>(p.num_chunks, dev_heap,
+                                                        dev_sums + sp.pad);
         // checkCUDAError("kern_inc failed");
     } else {
         kern_scan<<<p.num_chunks, threads_per_block,
-                    p.chunk_size * sizeof(int)>>>(p.chunk_size, dev_heap,
-                                                  nullptr, false);
+                    chunk_size * sizeof(int)>>>(dev_heap, nullptr, false);
         // checkCUDAError("kern_scan failed");
     }
 }
