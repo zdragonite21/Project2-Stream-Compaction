@@ -5,6 +5,7 @@ set(headers
     "efficient.h"
     "chunk.h"
     "heap.h"
+    "bank.h"
     "thrust.h"
     )
 
@@ -15,6 +16,7 @@ set(sources
     "efficient.cu"
     "chunk.cu"
     "heap.cu"
+    "bank.cu"
     "thrust.cu"
     )
 
