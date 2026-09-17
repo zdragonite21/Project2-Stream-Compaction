@@ -10,8 +10,9 @@
 #include <array>
 #include <cstdio>
 #include <functional>
-#include <stream_compaction/chunk.h>
 #include <stream_compaction/cpu.h>
+#include <stream_compaction/chunk.h>
+#include <stream_compaction/heap.h>
 #include <stream_compaction/efficient.h>
 #include <stream_compaction/naive.h>
 #include <stream_compaction/thrust.h>
@@ -203,7 +204,7 @@ struct ScanImpl {
 void profile() {
     constexpr int runs = 10;
 
-    std::array<ScanImpl, 5> scan_funcs{
+    std::array<ScanImpl, 6> scan_funcs{
         ScanImpl{StreamCompaction::CPU::scan,
                  [] {
                      return StreamCompaction::CPU::timer()
@@ -223,6 +224,12 @@ void profile() {
                          .getGpuElapsedTimeForPreviousOperation();
                  },
                  "recursive shared memory chunk scan"},
+        ScanImpl{StreamCompaction::Heap::scan,
+                 [] {
+                     return StreamCompaction::Heap::timer()
+                         .getGpuElapsedTimeForPreviousOperation();
+                 },
+                 "recursive shared memory heap scan"},
         ScanImpl{StreamCompaction::Efficient::scan,
                  [] {
                      return StreamCompaction::Efficient::timer()

@@ -4,6 +4,7 @@ set(headers
     "naive.h"
     "efficient.h"
     "chunk.h"
+    "heap.h"
     "thrust.h"
     )
 
@@ -13,6 +14,7 @@ set(sources
     "naive.cu"
     "efficient.cu"
     "chunk.cu"
+    "heap.cu"
     "thrust.cu"
     )
 
