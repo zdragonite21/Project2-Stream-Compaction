@@ -44,8 +44,10 @@ __global__ void kern_scan(int *data, int *sums, bool store_sum) {
     int local_thid = threadIdx.x;
     int block_base = blockIdx.x * chunk_size;
 
-    int ai = local_thid << 1;
-    int bi = (local_thid << 1) + 1;
+    // organized this way for coalesced memory access
+    // syncthreads ensures that all the data is in shared memory before we begin
+    int ai = local_thid;
+    int bi = local_thid + (chunk_size >> 1);
     temp[ai + CONFLICT_FREE_OFFSET(ai)] = data[block_base + ai];
     temp[bi + CONFLICT_FREE_OFFSET(bi)] = data[block_base + bi];
 
