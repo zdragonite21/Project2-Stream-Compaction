@@ -4,7 +4,7 @@
 #include <cuda_runtime.h>
 #include <iostream>
 
-#define threads_per_block 1024
+#define threads_per_block 256
 // one thread handles two elements
 #define chunk_size 2 * threads_per_block
 
@@ -24,7 +24,7 @@ __global__ void kern_inc(int num_chunks, int *data, int *sums) {
     }
     int base = thid * chunk_size;
     int inc = sums[thid];
-#pragma unroll
+#pragma unroll 32
     for (int i = 0; i < chunk_size; ++i) {
         data[base + i] += inc;
     }

@@ -4,7 +4,7 @@
 #include <cuda_runtime.h>
 #include <vector>
 
-#define threads_per_block 1024
+#define threads_per_block 256
 
 namespace StreamCompaction {
 namespace Naive {

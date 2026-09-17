@@ -4,7 +4,7 @@
 #include <cuda_runtime.h>
 #include <iostream>
 
-#define threads_per_block 16
+#define threads_per_block 256
 
 namespace StreamCompaction {
 namespace Chunk {

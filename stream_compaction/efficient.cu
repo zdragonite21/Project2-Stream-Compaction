@@ -4,7 +4,7 @@
 #include <cuda_runtime.h>
 #include <iostream>
 
-#define threads_per_block 1024
+#define threads_per_block 256
 // one thread handles two elements
 #define chunk_size (threads_per_block << 1)
 
