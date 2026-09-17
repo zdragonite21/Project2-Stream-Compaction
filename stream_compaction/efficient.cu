@@ -6,7 +6,15 @@
 
 #define threads_per_block 1024
 // one thread handles two elements
-#define chunk_size 2 * threads_per_block
+#define chunk_size (threads_per_block << 1)
+
+#define NUM_BANKS 32
+#define LOG_NUM_BANKS 5
+// floor(n / 32)
+#define CONFLICT_FREE_OFFSET(n) ((n) >> LOG_NUM_BANKS)
+
+// pad shared memory for the additional indices used for elmiinating bank conflicts
+#define shared_size (chunk_size + chunk_size / NUM_BANKS)
 
 namespace StreamCompaction {
 namespace Efficient {
@@ -24,7 +32,7 @@ __global__ void kern_inc(int num_chunks, int *data, int *sums) {
     }
     int base = thid * chunk_size;
     int inc = sums[thid];
-#pragma unroll
+#pragma unroll 32
     for (int i = 0; i < chunk_size; ++i) {
         data[base + i] += inc;
     }
@@ -36,8 +44,10 @@ __global__ void kern_scan(int *data, int *sums, bool store_sum) {
     int local_thid = threadIdx.x;
     int block_base = blockIdx.x * chunk_size;
 
-    temp[local_thid << 1] = data[block_base + (local_thid << 1)];
-    temp[(local_thid << 1) + 1] = data[block_base + (local_thid << 1) + 1];
+    int ai = local_thid << 1;
+    int bi = (local_thid << 1) + 1;
+    temp[ai + CONFLICT_FREE_OFFSET(ai)] = data[block_base + ai];
+    temp[bi + CONFLICT_FREE_OFFSET(bi)] = data[block_base + bi];
 
     // upsweep
     int offset = 1;
@@ -45,9 +55,11 @@ __global__ void kern_scan(int *data, int *sums, bool store_sum) {
     for (int d = chunk_size >> 1; d > 0; d >>= 1) {
         __syncthreads();
         if (local_thid < d) {
-            int base = 2 * offset * local_thid;
+            int base = (offset << 1) * local_thid;
             int ai = base + offset - 1;
-            int bi = base + 2 * offset - 1;
+            int bi = base + (offset << 1) - 1;
+            ai += CONFLICT_FREE_OFFSET(ai);
+            bi += CONFLICT_FREE_OFFSET(bi);
             temp[bi] += temp[ai];
         }
         offset <<= 1;
@@ -57,18 +69,21 @@ __global__ void kern_scan(int *data, int *sums, bool store_sum) {
     int total;
     if (local_thid == 0) {
         // have the first thread clear the last element
-        total = temp[chunk_size - 1];
-        temp[chunk_size - 1] = 0;
+        int end = chunk_size - 1;
+        end += CONFLICT_FREE_OFFSET(end);
+        total = temp[end];
+        temp[end] = 0;
     }
 #pragma unroll
     for (int d = 1; d < chunk_size; d <<= 1) {
         offset >>= 1;
         __syncthreads();
         if (local_thid < d) {
-            int base = 2 * offset * local_thid;
+            int base = (offset << 1) * local_thid;
             int ai = base + offset - 1;
-            int bi = base + 2 * offset - 1;
-
+            int bi = base + (offset << 1) - 1;
+            ai += CONFLICT_FREE_OFFSET(ai);
+            bi += CONFLICT_FREE_OFFSET(bi);
             int t = temp[ai];
             temp[ai] = temp[bi];
             temp[bi] += t;
@@ -76,8 +91,8 @@ __global__ void kern_scan(int *data, int *sums, bool store_sum) {
     }
 
     __syncthreads();
-    data[block_base + (local_thid << 1)] = temp[local_thid << 1];
-    data[block_base + (local_thid << 1) + 1] = temp[(local_thid << 1) + 1];
+    data[block_base + ai] = temp[ai + CONFLICT_FREE_OFFSET(ai)];
+    data[block_base + bi] = temp[bi + CONFLICT_FREE_OFFSET(bi)];
 
     if (store_sum && local_thid == 0) {
         sums[blockIdx.x] = total;
@@ -111,7 +126,7 @@ void recursive_scan(params p, int *dev_heap) {
         int *dev_sums = dev_heap + p.padded_size;
 
         kern_scan<<<p.num_chunks, threads_per_block,
-                    chunk_size * sizeof(int)>>>(dev_heap, dev_sums + sp.pad,
+                    shared_size * sizeof(int)>>>(dev_heap, dev_sums + sp.pad,
                                                 true);
         // checkCUDAError("kern_scan write sum failed");
 
@@ -122,7 +137,7 @@ void recursive_scan(params p, int *dev_heap) {
         // checkCUDAError("kern_inc failed");
     } else {
         kern_scan<<<p.num_chunks, threads_per_block,
-                    chunk_size * sizeof(int)>>>(dev_heap, nullptr, false);
+                    shared_size * sizeof(int)>>>(dev_heap, nullptr, false);
         // checkCUDAError("kern_scan failed");
     }
 }
@@ -131,6 +146,10 @@ void recursive_scan(params p, int *dev_heap) {
  * Performs prefix-sum (aka scan) on idata, storing the result into odata.
  */
 void scan(int n, int *odata, const int *idata) {
+    if (n == 0) {
+        return;
+    }
+
     params p = compute_params(n);
 
     // compute the exact total amount of memory needed
@@ -146,6 +165,7 @@ void scan(int n, int *odata, const int *idata) {
     int *dev_heap;
     cudaMalloc((void **)&dev_heap, heap_size * sizeof(int));
     checkCUDAError("cudaMalloc heap failed!");
+    // mem set to 0 so that any padding we have are 0s
     cudaMemset(dev_heap, 0, heap_size * sizeof(int));
     checkCUDAError("cudaMemset heap failed!");
     cudaMemcpy(dev_heap + p.pad, idata, n * sizeof(int),
