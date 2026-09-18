@@ -151,7 +151,9 @@ In addition to vectorizing the scan kernel, it seemed fitting to vectorize the r
 ### effects of block size
 ![alt text](images/scan-performance-block-size-power-of-two.png)
 
-Block size doesn't seem to have a significant impact on performance besides 1024. My guess is shared memory is the bottleneck at higher block sizes, while smaller block sizes operate on more total eleements and utilize shared memory less effectively. A next step would be to analyze the stats in Nsight compute.
+Block size doesn't seem to have a significant impact on performance besides 1024. My guess is shared memory is the bottleneck at higher block sizes, while smaller block sizes operate on more total eleements and utilize shared memory less effectively. A next step would be to analyze the stats in Nsight compute. 
+
+I decided to use a block size of 128 from the results of this benchmark for the following tests.
 
 ### effects of array size
 #### all implementations (Power-of-Two)
@@ -172,6 +174,83 @@ Surprisingly, reducing the bank conflicts didn't have as large of an impact as I
 
 My implementation is faster than thrust's at some array sizes! I wonder if Thrust's implementation switches to a different method between (2^17 and 2^18) elements that scales better for large arrays.
 
+### project configuration
+I created a `config.h` file that stores global macros and other values that I used during performance testing. 
+
+```c
+#define PROFILE 0
+#define CORRECTNESS 0
+#define WARM_UP 0
+#define BLOCK_SIZE_ALL 0
+#define ARRAY_SIZE_ALL 0
+#define ARRAY_SIZE_ALL_NPOT 0
+#define ARRAY_SIZE_EFFICIENT_THRUST 0
+```
+
+- PROFILE=1 skips the main function and enables my custom profiling loops
+- CORRECTNESS=1 runs correctness tests (similar to the main loop)
+- The other macros enable and disable other tests
+
+I created a array of function pointers to my implementations so I could easily loop over them when doing performance testing.
+
+
+Here is an example output with just the main function on `2^25` elements:
+
+```
+****************
+** SCAN TESTS **
+****************
+    [  14   8  35  12  41   4   5  25  15   8   4  17  16 ...  44   0 ]
+==== cpu scan, power-of-two ====
+   elapsed time: 57.6031ms    (std::chrono Measured)
+    [   0  14  22  57  69 110 114 119 144 159 167 171 188 ... 821828066 821828110 ]
+==== cpu scan, non-power-of-two ====
+   elapsed time: 56.6679ms    (std::chrono Measured)
+    [   0  14  22  57  69 110 114 119 144 159 167 171 188 ... 821828026 821828044 ]
+    passed 
+==== naive scan, power-of-two ====
+   elapsed time: 32.6138ms    (CUDA Measured)
+    passed 
+==== naive scan, non-power-of-two ====
+   elapsed time: 32.0645ms    (CUDA Measured)
+    passed 
+==== work-efficient scan, power-of-two ====
+   elapsed time: 2.66589ms    (CUDA Measured)
+    passed 
+==== work-efficient scan, non-power-of-two ====
+   elapsed time: 2.37107ms    (CUDA Measured)
+    passed 
+==== thrust scan, power-of-two ====
+   elapsed time: 2.03571ms    (CUDA Measured)
+    passed 
+==== thrust scan, non-power-of-two ====
+   elapsed time: 2.03469ms    (CUDA Measured)
+    passed 
+
+*****************************
+** STREAM COMPACTION TESTS **
+*****************************
+    [   3   0   3   3   0   1   2   2   1   2   0   3   3 ...   1   0 ]
+==== cpu compact without scan, power-of-two ====
+   elapsed time: 79.371ms    (std::chrono Measured)
+    [   3   3   3   1   2   2   1   2   3   3   2   1   3 ...   3   1 ]
+    passed 
+==== cpu compact without scan, non-power-of-two ====
+   elapsed time: 77.4268ms    (std::chrono Measured)
+    [   3   3   3   1   2   2   1   2   3   3   2   1   3 ...   1   3 ]
+    passed 
+==== cpu compact with scan ====
+   elapsed time: 163.638ms    (std::chrono Measured)
+    [   3   3   3   1   2   2   1   2   3   3   2   1   3 ...   3   1 ]
+    passed 
+==== work-efficient compact, power-of-two ====
+   elapsed time: 5.05754ms    (CUDA Measured)
+    passed 
+==== work-efficient compact, non-power-of-two ====
+   elapsed time: 5.02477ms    (CUDA Measured)
+    passed 
+Press any key to continue . . .
+```
 
 ## modifications to cmakelists
 
