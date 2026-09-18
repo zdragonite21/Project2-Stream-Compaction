@@ -149,6 +149,7 @@ In addition to vectorizing the scan kernel, it seemed fitting to vectorize the r
 ## performance analysis
 
 ### effects of block size
+![alt text](images/scan-performance-block-size-power-of-two.png)
 
 ### effects of array size
 all
@@ -166,4 +167,9 @@ thrust vs optimized
 
 ## modifications to cmakelists
 
+
+
 ## references
+[GPU Gems 3, Chapter 39](https://developer.nvidia.com/gpugems/gpugems3/part-vi-gpu-computing/chapter-39-parallel-prefix-sum-scan-cuda)
+
+Most of my ideas for optimizations came from this article.
