@@ -18,12 +18,10 @@
 #include <stream_compaction/heap.h>
 #include <stream_compaction/naive.h>
 #include <stream_compaction/thrust.h>
+#include <stream_compaction/config.h>
 #include <string>
 
 #define PROFILE 1
-
-constexpr int NPOT_DIFF = 3;
-constexpr int runs = 10;
 
 constexpr int SIZE = 1 << 25;
 const int NPOT = SIZE - NPOT_DIFF;

@@ -3,8 +3,8 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <iostream>
+#include "config.h"
 
-#define threads_per_block 128
 #define items_per_thread_log2 3 // 8 total per thread (int4, int4)
 #define vec_width_log2 2        // int4s
 #define items_per_thread (1 << items_per_thread_log2)
