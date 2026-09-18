@@ -132,7 +132,19 @@ Note: here I've started to add `#pragma unroll` before our loops to tell the com
 
 ### vectorization
 
+This was the last optimization that I made, which was included at the end of the GPU Gems article. The high level idea is: Instead of each thread handling 2 elements, they instead handle 8!
 
+The idea is to break down our chunks into even smaller chunks of 4 ints, and do independent scans int4s, then combine them using the same logic as the block sums. So essentially, we are doing a finer grain of a scan.
+
+In addition, since int4s are 16 bytes each, reducing global memory load instructions and they are naturally aligned.
+
+As for the actual implementation, is it possible to only use an additional 3 registers per int4, and store the 4 value in shared memory, as I do in the code.
+
+Note that each block now handles more 4x more elements, but we perform the up-sweep and down-sweep on the number of elements as before (2 x threads_per_block) since it is only applied to the sums of each int4 (now one layer above the bottom).
+
+Why not do more than 8 elements per thread? More elements, means more registers. Two int4s strikes a good balance between the number of registers used and the number of elements we can process.
+
+In addition to vectorizing the scan kernel, it seemed fitting to vectorize the rest of the kernels.
 
 ## performance analysis
 
