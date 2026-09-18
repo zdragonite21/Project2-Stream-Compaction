@@ -152,8 +152,17 @@ In addition to vectorizing the scan kernel, it seemed fitting to vectorize the r
 
 ### effects of array size
 all
+![alt text](images/scan-performance-block-128.png)
+
+non power of two all
+![alt text](images/scan-performance-non-power-of-two-block-128.png)
+
 optimized
+![alt text](images/scan-performance-five-gpu-power-of-two-block-128.png)
+
 thrust vs optimized
+![alt text](images/scan-performance-vectorized-vs-thrust-power-of-two-block-128.png)
+
 
 ## modifications to cmakelists
 
