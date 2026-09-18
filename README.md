@@ -79,6 +79,8 @@ The high level overview of this implementation is we break the array into chunks
 
 Since each block handles one chunk of the array, we can effectively utilize shared memory. Each thread in each block handles 2 elements, and the kernel handles the upsweep and the down sweep as we can use `__syncthreads()` to synchronize between warps within the same block.
 
+Note: one optimization that I made was instead of using a modulo in the loop, I use `(thid < d)` to reduce divergence within the warps.
+
 ### arbitrary array sizes
 
 Here is where it gets tricky: the issue is our block sums array may larger than the chunk size that each block can handle, so have to *recursively* perform a scan on the block sum array.
