@@ -333,9 +333,6 @@ void profile() {
     printf("\n");
 
     printf("\narray size");
-    free(a);
-    free(b);
-    free(c);
     for (const auto &impl : scan_funcs) {
         printf("\t%s (ms)", impl.name.c_str());
     }
