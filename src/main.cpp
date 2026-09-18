@@ -379,7 +379,7 @@ void profile() {
     for (int i = 5; i < scan_funcs.size(); ++i) {
         printf(",%s (ms)", scan_funcs[i].name.c_str());
     }
-    for (int size_log2 = 10; size_log2 <= 28; ++size_log2) {
+    for (int size_log2 = 10; size_log2 <= 27; ++size_log2) {
         int size = 1 << size_log2;
         int npot = size - NPOT_DIFF;
         int *sa = new int[size];
@@ -387,7 +387,7 @@ void profile() {
         int *sc = new int[size];
         genArray(size, sa, 50);
         printf("\n%d", size_log2);
-        for (int i = 5; i < scan_funcs.size(); ++i) {
+        for (int i = 2; i < scan_funcs.size(); ++i) {
             ScanImpl &impl = scan_funcs[i];
             float total_time{};
             for (int j = 0; j < RUNS; ++j) {

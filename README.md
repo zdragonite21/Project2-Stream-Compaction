@@ -10,8 +10,9 @@ A fast cuda stream compaction implementation that sometimes beats thrust :).
   - [LinkedIn](https://linkedin.com/in/zleong), [personal website](https://zacharyleong.com)
 - Tested on: Windows 11, Ultra 9 185H @ 2.30GHz 32GB, RTX 4060 Laptop (personal)
 
-### (TODO: Your README)
+### implementations
 
-Include analysis, etc. (Remember, this is public, so don't put
-anything here that you don't want to share with the world.)
+### catching up to thrust
+
+###
 
