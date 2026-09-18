@@ -151,23 +151,31 @@ In addition to vectorizing the scan kernel, it seemed fitting to vectorize the r
 ### effects of block size
 ![alt text](images/scan-performance-block-size-power-of-two.png)
 
+Block size doesn't seem to have a significant impact on performance besides 1024. My guess is shared memory is the bottleneck at higher block sizes, while smaller block sizes operate on more total eleements and utilize shared memory less effectively. A next step would be to analyze the stats in Nsight compute.
+
 ### effects of array size
-all
+#### all implementations (Power-of-Two)
 ![alt text](images/scan-performance-block-128.png)
 
-non power of two all
+#### all implementations (Non-Power-of-Two)
 ![alt text](images/scan-performance-non-power-of-two-block-128.png)
 
-optimized
+Note that there is no "laddering" occuring in my implementations because they pad at most the chunk size.
+
+#### optimized implementations (excluding cpu and naive)
 ![alt text](images/scan-performance-five-gpu-power-of-two-block-128.png)
 
-thrust vs optimized
+Surprisingly, reducing the bank conflicts didn't have as large of an impact as I had expected. It might be because the max degree of the bank conflict (near the middle iteration) is still relatively low. 
+
+#### my implementation vs thrust
 ![alt text](images/scan-performance-vectorized-vs-thrust-power-of-two-block-128.png)
+
+My implementation is faster than thrust's at some array sizes! I wonder if Thrust's implementation switches to a different method between (2^17 and 2^18) elements that scales better for large arrays.
 
 
 ## modifications to cmakelists
 
-
+I updated the CMake files to include CUDA Toolkit headers for both the executable and the stream-compaction library, so they can find the CUDA headers during compilation. I also added the chunk, heap, and bank implementations to the library’s build list so they compile and link into the project.
 
 ## references
 [GPU Gems 3, Chapter 39](https://developer.nvidia.com/gpugems/gpugems3/part-vi-gpu-computing/chapter-39-parallel-prefix-sum-scan-cuda)
