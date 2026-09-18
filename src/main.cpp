@@ -10,21 +10,23 @@
 #include <array>
 #include <cstdio>
 #include <functional>
-#include <stream_compaction/cpu.h>
+#include <iostream>
+#include <stream_compaction/bank.h>
 #include <stream_compaction/chunk.h>
-#include <stream_compaction/heap.h>
+#include <stream_compaction/cpu.h>
 #include <stream_compaction/efficient.h>
+#include <stream_compaction/heap.h>
 #include <stream_compaction/naive.h>
 #include <stream_compaction/thrust.h>
-#include <stream_compaction/bank.h>
 #include <string>
-#include <iostream>
 
-#define PROFILE 0
+#define PROFILE 1
 
-const int SIZE_LOG2 = 25;
-constexpr int SIZE = 1 << SIZE_LOG2;  // feel free to change the size of array
-const int NPOT = SIZE - 3; // Non-Power-Of-Two
+constexpr int NPOT_DIFF = 3;
+constexpr int runs = 10;
+
+constexpr int SIZE = 1 << 25;
+const int NPOT = SIZE - NPOT_DIFF;
 int *a = new int[SIZE];
 int *b = new int[SIZE];
 int *c = new int[SIZE];
@@ -204,8 +206,6 @@ struct ScanImpl {
 };
 
 void profile() {
-    constexpr int runs = 10;
-
     std::array<ScanImpl, 7> scan_funcs{
         ScanImpl{StreamCompaction::CPU::scan,
                  [] {
@@ -314,7 +314,8 @@ void profile() {
         printElapsedTime(static_cast<float>(total_time / runs), "(avg ms)");
     }
 
-    constexpr int block_size = 128; // Label only: match the CUDA block sizes manually.
+    constexpr int block_size =
+        128; // Label only: match the CUDA block sizes manually.
     printf("\nblock size");
     for (const auto &impl : scan_funcs) {
         printf("\t%s (ms)", impl.name.c_str());
@@ -332,20 +333,38 @@ void profile() {
     printf("\n");
 
     printf("\narray size");
+    free(a);
+    free(b);
+    free(c);
     for (const auto &impl : scan_funcs) {
         printf("\t%s (ms)", impl.name.c_str());
     }
-    printf("\n%d", SIZE_LOG2);
-    for (const auto &impl : scan_funcs) {
-        float total_time{};
-        for (int j = 0; j < runs; ++j) {
-            zeroArray(SIZE, c);
-            impl.scan(SIZE, c, a);
-            total_time += impl.elapsed();
+    for (int size_log2 = 10; size_log2 <= 28; ++size_log2) {
+        int size = 1 << size_log2;
+        int npot = size - NPOT_DIFF;
+        int *sa = new int[size];
+        int *sb = new int[size];
+        int *sc = new int[size];
+        printf("\n%d", size_log2);
+        for (int i = 0; i < scan_funcs.size(); ++i) {
+            if (size_log2 > 26 && i < 2) {
+                printf("\t-1");
+                continue;
+            }
+            ScanImpl &impl = scan_funcs[i];
+            float total_time{};
+            for (int j = 0; j < runs; ++j) {
+                zeroArray(size, sc);
+                impl.scan(size, sc, sa);
+                total_time += impl.elapsed();
+            }
+            printf("\t%.3f", total_time / runs);
         }
-        printf("\t%.3f", total_time / runs);
+        printf("\n");
+        free(sa);
+        free(sb);
+        free(sc);
     }
-    printf("\n");
 
     delete[] a;
     delete[] b;

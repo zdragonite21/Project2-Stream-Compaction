@@ -1,11 +1,14 @@
-CUDA Stream Compaction
-======================
-
 **University of Pennsylvania, CIS 565: GPU Programming and Architecture, Project 2**
 
-* (TODO) YOUR NAME HERE
-  * (TODO) [LinkedIn](), [personal website](), [twitter](), etc.
-* Tested on: (TODO) Windows 22, i7-2222 @ 2.22GHz 22GB, GTX 222 222MB (Moore 2222 Lab)
+# fast cuda stream compaction
+
+A fast cuda stream compaction implementation that sometimes beats thrust :).
+
+### specs
+
+- Zachary Leong
+  - [LinkedIn](https://linkedin.com/in/zleong), [personal website](https://zacharyleong.com)
+- Tested on: Windows 11, Ultra 9 185H @ 2.30GHz 32GB, RTX 4060 Laptop (personal)
 
 ### (TODO: Your README)
 
