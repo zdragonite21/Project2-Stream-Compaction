@@ -14,7 +14,7 @@
 #define CONFLICT_FREE_OFFSET(n) ((n) >> LOG_NUM_BANKS)
 
 // pad shared memory for the additional indices used for elmiinating bank conflicts
-#define shared_size (chunk_size + chunk_size / NUM_BANKS)
+#define shared_mem_size (chunk_size + chunk_size / NUM_BANKS)
 
 namespace StreamCompaction {
 namespace Bank {
@@ -128,7 +128,7 @@ void recursive_scan(params p, int *dev_heap) {
         int *dev_sums = dev_heap + p.padded_size;
 
         kern_scan<<<p.num_chunks, threads_per_block,
-                    shared_size * sizeof(int)>>>(dev_heap, dev_sums + sp.pad,
+                    shared_mem_size * sizeof(int)>>>(dev_heap, dev_sums + sp.pad,
                                                 true);
         // checkCUDAError("kern_scan write sum failed");
 
@@ -139,7 +139,7 @@ void recursive_scan(params p, int *dev_heap) {
         // checkCUDAError("kern_inc failed");
     } else {
         kern_scan<<<p.num_chunks, threads_per_block,
-                    shared_size * sizeof(int)>>>(dev_heap, nullptr, false);
+                    shared_mem_size * sizeof(int)>>>(dev_heap, nullptr, false);
         // checkCUDAError("kern_scan failed");
     }
 }

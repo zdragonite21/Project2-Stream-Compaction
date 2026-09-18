@@ -242,7 +242,7 @@ void profile() {
                      return StreamCompaction::Efficient::timer()
                          .getGpuElapsedTimeForPreviousOperation();
                  },
-                 "efficient gpu scan"},
+                 "vectorized gpu scan"},
         ScanImpl{StreamCompaction::Thrust::scan,
                  [] {
                      return StreamCompaction::Thrust::timer()

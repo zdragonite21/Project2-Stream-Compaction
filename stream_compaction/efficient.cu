@@ -6,11 +6,11 @@
 
 #define threads_per_block 128
 #define items_per_thread_log2 3 // 8 total per thread (int4, int4)
-#define vec_width_log2 2 // int4s
+#define vec_width_log2 2        // int4s
 #define items_per_thread (1 << items_per_thread_log2)
 #define vec_width (1 << vec_width_log2)
 #define chunk_size (threads_per_block << items_per_thread_log2)
-#define vec_chunk_size (chunk_size >> vec_width_log2) 
+#define vec_chunk_size (chunk_size >> vec_width_log2)
 
 #define NUM_BANKS_LOG2 5
 #define NUM_BANKS (1 << NUM_BANKS_LOG2)
@@ -19,7 +19,7 @@
 
 // pad shared memory for the additional indices used for elmiinating bank
 // conflicts
-#define shared_size (shared_chunk_size + shared_chunk_size / NUM_BANKS)
+#define shared_mem_size (vec_chunk_size + vec_chunk_size / NUM_BANKS)
 
 namespace StreamCompaction {
 namespace Efficient {
@@ -34,13 +34,29 @@ __global__ void kern_inc(int num_chunks, int *data, int *sums) {
     if (chunk >= num_chunks) {
         return;
     }
-    
-    int base = chunk_size * chunk;
+
+    int4 *data4 = reinterpret_cast<int4 *>(data);
+
     int inc = sums[chunk];
-#pragma unroll
-    for (int i = 0; i < items_per_thread; ++i) {
-        data[base + i * threads_per_block + threadIdx.x] += inc;
-    }
+
+    int vec_base = (chunk * chunk_size) >> 2;
+    int vec_ai = threadIdx.x;
+    int vec_bi = threadIdx.x + threads_per_block;
+
+    int4 a = data4[vec_base + vec_ai];
+    int4 b = data4[vec_base + vec_bi];
+    a.x += inc;
+    a.y += inc;
+    a.z += inc;
+    a.w += inc;
+    
+    b.x += inc;
+    b.y += inc;
+    b.z += inc;
+    b.w += inc;
+
+    data4[vec_base + vec_ai] = a;
+    data4[vec_base + vec_bi] = b;
 }
 
 __global__ void kern_scan(int *data, int *sums, bool store_sum) {
@@ -50,17 +66,17 @@ __global__ void kern_scan(int *data, int *sums, bool store_sum) {
     int vec_block_base = (blockIdx.x * chunk_size) >> 2;
 
     int4 *data4 = reinterpret_cast<int4 *>(data);
-    
+
     // organized this way for coalesced memory access
     int vec_ai = thid;
     int vec_bi = thid + (chunk_size >> 3);
     int4 adata = data4[vec_block_base + vec_ai];
     int4 bdata = data4[vec_block_base + vec_bi];
-    
+
     int a1 = adata.x;
     int a2 = a1 + adata.y;
     int a3 = a2 + adata.z;
-    
+
     int b1 = bdata.x;
     int b2 = b1 + bdata.y;
     int b3 = b2 + bdata.z;
@@ -122,7 +138,7 @@ __global__ void kern_scan(int *data, int *sums, bool store_sum) {
     b1 += b0;
     b2 += b0;
     b3 += b0;
-    
+
     data4[vec_block_base + vec_ai] = make_int4(a0, a1, a2, a3);
     data4[vec_block_base + vec_bi] = make_int4(b0, b1, b2, b3);
 }
@@ -152,19 +168,16 @@ void recursive_scan(params p, int *dev_heap) {
         int *dev_sums = dev_heap + p.padded_size;
 
         kern_scan<<<p.num_chunks, threads_per_block,
-                    vec_chunk_size * sizeof(int)>>>(dev_heap, dev_sums + sp.pad,
-                                                 true);
-        // checkCUDAError("kern_scan write sum failed");
+                    shared_mem_size * sizeof(int)>>>(dev_heap,
+                                                     dev_sums + sp.pad, true);
 
         recursive_scan(sp, dev_sums);
 
         kern_inc<<<p.num_chunks, threads_per_block>>>(p.num_chunks, dev_heap,
-                                                        dev_sums + sp.pad);
-        // checkCUDAError("kern_inc failed");
+                                                      dev_sums + sp.pad);
     } else {
         kern_scan<<<p.num_chunks, threads_per_block,
-                    vec_chunk_size * sizeof(int)>>>(dev_heap, nullptr, false);
-        // checkCUDAError("kern_scan failed");
+                    shared_mem_size * sizeof(int)>>>(dev_heap, nullptr, false);
     }
 }
 
