@@ -22,7 +22,8 @@
 
 #define PROFILE 1
 
-const int SIZE = 1 << 25;  // feel free to change the size of array
+const int SIZE_LOG2 = 25;
+constexpr int SIZE = 1 << SIZE_LOG2;  // feel free to change the size of array
 const int NPOT = SIZE - 3; // Non-Power-Of-Two
 int *a = new int[SIZE];
 int *b = new int[SIZE];
@@ -312,6 +313,39 @@ void profile() {
         }
         printElapsedTime(static_cast<float>(total_time / runs), "(avg ms)");
     }
+
+    constexpr int block_size = 128; // Label only: match the CUDA block sizes manually.
+    printf("\nblock size");
+    for (const auto &impl : scan_funcs) {
+        printf("\t%s (ms)", impl.name.c_str());
+    }
+    printf("\n%d", block_size);
+    for (const auto &impl : scan_funcs) {
+        float total_time{};
+        for (int j = 0; j < runs; ++j) {
+            zeroArray(SIZE, c);
+            impl.scan(SIZE, c, a);
+            total_time += impl.elapsed();
+        }
+        printf("\t%.3f", total_time / runs);
+    }
+    printf("\n");
+
+    printf("\narray size");
+    for (const auto &impl : scan_funcs) {
+        printf("\t%s (ms)", impl.name.c_str());
+    }
+    printf("\n%d", SIZE_LOG2);
+    for (const auto &impl : scan_funcs) {
+        float total_time{};
+        for (int j = 0; j < runs; ++j) {
+            zeroArray(SIZE, c);
+            impl.scan(SIZE, c, a);
+            total_time += impl.elapsed();
+        }
+        printf("\t%.3f", total_time / runs);
+    }
+    printf("\n");
 
     delete[] a;
     delete[] b;
