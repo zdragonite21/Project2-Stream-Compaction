@@ -20,7 +20,7 @@
 #include <string>
 #include <iostream>
 
-#define PROFILE 1
+#define PROFILE 0
 
 const int SIZE_LOG2 = 25;
 constexpr int SIZE = 1 << SIZE_LOG2;  // feel free to change the size of array

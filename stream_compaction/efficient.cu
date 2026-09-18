@@ -49,7 +49,7 @@ __global__ void kern_inc(int num_chunks, int *data, int *sums) {
     a.y += inc;
     a.z += inc;
     a.w += inc;
-    
+
     b.x += inc;
     b.y += inc;
     b.z += inc;
@@ -220,6 +220,76 @@ void scan(int n, int *odata, const int *idata) {
     cudaFree(dev_heap);
 }
 
+__global__ void kern_eval(int num_chunks, int *data, int *d_bool) {
+    int chunk = blockIdx.x;
+    if (chunk >= num_chunks) {
+        return;
+    }
+
+    int4 *data4 = reinterpret_cast<int4 *>(data);
+    int4 *bool4 = reinterpret_cast<int4 *>(d_bool);
+
+    int vec_base = (chunk * chunk_size) >> 2;
+    int vec_ai = threadIdx.x;
+    int vec_bi = threadIdx.x + threads_per_block;
+
+    int4 abool;
+    int4 bbool;
+
+    int4 a = data4[vec_base + vec_ai];
+    int4 b = data4[vec_base + vec_bi];
+    abool.x = a.x == 0 ? 0 : 1;
+    abool.y = a.y == 0 ? 0 : 1;
+    abool.z = a.z == 0 ? 0 : 1;
+    abool.w = a.w == 0 ? 0 : 1;
+
+    bbool.x = b.x == 0 ? 0 : 1;
+    bbool.y = b.y == 0 ? 0 : 1;
+    bbool.z = b.z == 0 ? 0 : 1;
+    bbool.w = b.w == 0 ? 0 : 1;
+
+    bool4[vec_base + vec_ai] = abool;
+    bool4[vec_base + vec_bi] = bbool;
+}
+
+__global__ void kern_compact(int num_chunks, int *odata, const int *idata,
+                             const int *d_bool) {
+    int chunk = blockIdx.x;
+    if (chunk >= num_chunks) {
+        return;
+    }
+
+    const int4 *idata4 = reinterpret_cast<const int4 *>(idata);
+    const int4 *bool4 = reinterpret_cast<const int4 *>(d_bool);
+
+    int vec_base = (chunk * chunk_size) >> 2;
+    int vec_ai = threadIdx.x;
+    int vec_bi = threadIdx.x + threads_per_block;
+
+    int4 ai = bool4[vec_base + vec_ai];
+    int4 bi = bool4[vec_base + vec_bi];
+    int4 vec_a = idata4[vec_base + vec_ai];
+    int4 vec_b = idata4[vec_base + vec_bi];
+
+    if (vec_a.x != 0) {
+        odata[ai.x] = vec_a.x;
+    }
+    if (vec_a.y != 0) {
+        odata[ai.y] = vec_a.y;
+    }
+    if (vec_a.z != 0) {
+        odata[ai.z] = vec_a.z;
+    }
+    if (vec_a.w != 0) {
+        odata[ai.w] = vec_a.w;
+    }
+
+    if (vec_b.x != 0) {odata[bi.x] = vec_b.x;}
+    if (vec_b.y != 0) {odata[bi.y] = vec_b.y;}
+    if (vec_b.z != 0) {odata[bi.z] = vec_b.z;}
+    if (vec_b.w != 0) {odata[bi.w] = vec_b.w;}
+}
+
 /**
  * Performs stream compaction on idata, storing the result into odata.
  * All zeroes are discarded.
@@ -230,10 +300,62 @@ void scan(int n, int *odata, const int *idata) {
  * @returns      The number of elements remaining after compaction.
  */
 int compact(int n, int *odata, const int *idata) {
+    if (n == 0) {
+        return -1;
+    }
+
+    params p = compute_params(n);
+
+    // compute the exact total amount of memory needed
+    int heap_size = p.padded_size;
+    params a = p;
+    while (a.num_chunks > 1) {
+        params b = compute_params(a.num_chunks);
+        heap_size += b.padded_size;
+        a = b;
+    }
+
+    // store all data and block sum arrays in one heap
+    int *dev_heap;
+    cudaMalloc((void **)&dev_heap, heap_size * sizeof(int));
+    checkCUDAError("cudaMalloc heap failed!");
+    // mem set to 0 so that any padding we have are 0s
+    cudaMemset(dev_heap, 0, heap_size * sizeof(int));
+    checkCUDAError("cudaMemset heap failed!");
+    cudaMemcpy(dev_heap + p.pad, idata, n * sizeof(int),
+               cudaMemcpyHostToDevice);
+    checkCUDAError("cudaMemcpy heap failed!");
+
+    int *dev_bool;
+    cudaMalloc((void **)&dev_bool, p.padded_size * sizeof(int));
+    checkCUDAError("cudaMalloc bool failed!");
+    cudaMemset(dev_bool, 0, p.padded_size * sizeof(int));
+    checkCUDAError("cudaMemset bool failed!");
+
+    int *dev_odata;
+    cudaMalloc((void **)&dev_odata, p.padded_size * sizeof(int));
+    checkCUDAError("cudaMalloc odata failed!");
+
     timer().startGpuTimer();
-    // TODO
+    kern_eval<<<p.num_chunks, threads_per_block>>>(p.num_chunks, dev_heap,
+                                                   dev_bool);
+    recursive_scan(p, dev_bool);
+    kern_compact<<<p.num_chunks, threads_per_block>>>(p.num_chunks, dev_odata,
+                                                      dev_heap, dev_bool);
+
     timer().endGpuTimer();
-    return -1;
+
+    int compact_num;
+    cudaMemcpy(&compact_num, dev_bool + (p.padded_size - 1), sizeof(int),
+               cudaMemcpyDeviceToHost);
+    compact_num = compact_num + (idata[n - 1] != 0);
+    cudaMemcpy(odata, dev_odata, compact_num * sizeof(int),
+               cudaMemcpyDeviceToHost);
+    cudaFree(dev_heap);
+    cudaFree(dev_bool);
+    cudaFree(dev_odata);
+
+    return compact_num;
 }
 } // namespace Efficient
 } // namespace StreamCompaction
