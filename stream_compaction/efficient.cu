@@ -5,14 +5,17 @@
 #include <iostream>
 
 #define threads_per_block 128
-// one thread handles two elements
-#define shared_chunk_size (threads_per_block << 1)
-#define chunk_size (threads_per_block << 3)
+#define items_per_thread_log2 3 // 8 total per thread (int4, int4)
+#define vec_width_log2 2 // int4s
+#define items_per_thread (1 << items_per_thread_log2)
+#define vec_width (1 << vec_width_log2)
+#define chunk_size (threads_per_block << items_per_thread_log2)
+#define vec_chunk_size (chunk_size >> vec_width_log2) 
 
-#define NUM_BANKS 32
-#define LOG_NUM_BANKS 5
+#define NUM_BANKS_LOG2 5
+#define NUM_BANKS (1 << NUM_BANKS_LOG2)
 // floor(n / 32)
-#define CONFLICT_FREE_OFFSET(n) ((n) >> LOG_NUM_BANKS)
+#define CONFLICT_FREE_OFFSET(n) ((n) >> NUM_BANKS_LOG2)
 
 // pad shared memory for the additional indices used for elmiinating bank
 // conflicts
@@ -27,16 +30,16 @@ PerformanceTimer &timer() {
 }
 
 __global__ void kern_inc(int num_chunks, int *data, int *sums) {
-    // a thread is spawned per chunk
-    int thid = blockIdx.x * blockDim.x + threadIdx.x;
-    if (thid >= num_chunks) {
+    int chunk = blockIdx.x;
+    if (chunk >= num_chunks) {
         return;
     }
-    int base = thid * chunk_size;
-    int inc = sums[thid];
-#pragma unroll 32
-    for (int i = 0; i < chunk_size; ++i) {
-        data[base + i] += inc;
+    
+    int base = chunk_size * chunk;
+    int inc = sums[chunk];
+#pragma unroll
+    for (int i = 0; i < items_per_thread; ++i) {
+        data[base + i * threads_per_block + threadIdx.x] += inc;
     }
 }
 
@@ -49,8 +52,8 @@ __global__ void kern_scan(int *data, int *sums, bool store_sum) {
     int4 *data4 = reinterpret_cast<int4 *>(data);
     
     // organized this way for coalesced memory access
-    int vec_ai = (thid) >> 2;
-    int vec_bi = (thid + (chunk_size >> 1)) >> 2;
+    int vec_ai = thid;
+    int vec_bi = thid + (chunk_size >> 3);
     int4 adata = data4[vec_block_base + vec_ai];
     int4 bdata = data4[vec_block_base + vec_bi];
     
@@ -63,14 +66,14 @@ __global__ void kern_scan(int *data, int *sums, bool store_sum) {
     int b3 = b2 + bdata.z;
 
     int ai = thid;
-    int bi = thid + (shared_chunk_size >> 1);
+    int bi = thid + (vec_chunk_size >> 1);
     temp[ai + CONFLICT_FREE_OFFSET(ai)] = a3 + adata.w;
     temp[bi + CONFLICT_FREE_OFFSET(bi)] = b3 + bdata.w;
 
     // upsweep
     int offset = 1;
 #pragma unroll
-    for (int d = shared_chunk_size >> 1; d > 0; d >>= 1) {
+    for (int d = vec_chunk_size >> 1; d > 0; d >>= 1) {
         __syncthreads();
         if (thid < d) {
             int base = (offset << 1) * thid;
@@ -84,16 +87,17 @@ __global__ void kern_scan(int *data, int *sums, bool store_sum) {
     }
 
     // downsweep
-    int total;
     if (thid == 0) {
         // have the first thread clear the last element
-        int end = shared_chunk_size - 1;
+        int end = vec_chunk_size - 1;
         end += CONFLICT_FREE_OFFSET(end);
-        total = temp[end];
+        if (store_sum) {
+            sums[blockIdx.x] = temp[end];
+        }
         temp[end] = 0;
     }
 #pragma unroll
-    for (int d = 1; d < shared_chunk_size; d <<= 1) {
+    for (int d = 1; d < vec_chunk_size; d <<= 1) {
         offset >>= 1;
         __syncthreads();
         if (thid < d) {
@@ -121,10 +125,6 @@ __global__ void kern_scan(int *data, int *sums, bool store_sum) {
     
     data4[vec_block_base + vec_ai] = make_int4(a0, a1, a2, a3);
     data4[vec_block_base + vec_bi] = make_int4(b0, b1, b2, b3);
-
-    if (store_sum && thid == 0) {
-        sums[blockIdx.x] = total;
-    }
 }
 
 struct params {
@@ -149,23 +149,21 @@ void recursive_scan(params p, int *dev_heap) {
     params sp = compute_params(p.num_chunks);
 
     if (p.num_chunks > 1) {
-        int num_inc_blocks = divup(p.num_chunks, threads_per_block);
-
         int *dev_sums = dev_heap + p.padded_size;
 
         kern_scan<<<p.num_chunks, threads_per_block,
-                    shared_size * sizeof(int)>>>(dev_heap, dev_sums + sp.pad,
+                    vec_chunk_size * sizeof(int)>>>(dev_heap, dev_sums + sp.pad,
                                                  true);
         // checkCUDAError("kern_scan write sum failed");
 
         recursive_scan(sp, dev_sums);
 
-        kern_inc<<<num_inc_blocks, threads_per_block>>>(p.num_chunks, dev_heap,
+        kern_inc<<<p.num_chunks, threads_per_block>>>(p.num_chunks, dev_heap,
                                                         dev_sums + sp.pad);
         // checkCUDAError("kern_inc failed");
     } else {
         kern_scan<<<p.num_chunks, threads_per_block,
-                    shared_size * sizeof(int)>>>(dev_heap, nullptr, false);
+                    vec_chunk_size * sizeof(int)>>>(dev_heap, nullptr, false);
         // checkCUDAError("kern_scan failed");
     }
 }
